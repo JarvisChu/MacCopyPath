@@ -17,7 +17,13 @@ cd MacCopyPath
 ./install.sh
 ```
 
-`install.sh` 会把 `Copy Path.workflow` 拷贝到 `~/Library/Services/`，并刷新系统服务缓存，**立即生效，无需注销或重启**。
+`install.sh` 做三件事，**立即生效，无需注销或重启**：
+
+1. 把 `Copy Path.workflow` 拷贝到 `~/Library/Services/`
+2. 写入 pbs 偏好，显式启用右键菜单显示（**这一步必不可少**，原因见下方「为什么需要显式启用右键菜单」）
+3. 刷新服务缓存并重启 Finder
+
+脚本是幂等的，重复执行安全。
 
 ## 使用
 
@@ -39,25 +45,51 @@ cd MacCopyPath
 ./uninstall.sh
 ```
 
-会删除 `~/Library/Services/Copy Path.workflow` 并刷新服务缓存。
+会删除 `~/Library/Services/Copy Path.workflow`，一并清理安装时写入的 pbs 偏好记录，然后刷新服务缓存。不留残留。
 
 ## 常见问题
 
 **右键菜单里找不到 Copy Path？**
 
-1. 检查 **系统设置 → 键盘 → 键盘快捷键 → 服务 → 文件和文件夹** 中 `Copy Path` 是否被勾选。
+最常见的原因是**服务被系统识别了，但没有被启用到右键菜单**——典型表现是：
+系统设置的服务列表里**看得见** `Copy Path`（甚至已经勾选），但右键菜单里就是没有。
+
+先确认这一点：
+
+```bash
+defaults read pbs NSServicesStatus
+```
+
+如果输出里**没有** `"(null) - Copy Path - runWorkflowAsService"` 这一条，就是这个问题。
+`install.sh` 已经会自动处理；若要手动修复：
+
+```bash
+defaults write pbs NSServicesStatus -dict-add '"(null) - Copy Path - runWorkflowAsService"' \
+  '<dict><key>presentation_modes</key><dict><key>ContextMenu</key><integer>1</integer><key>FinderPreview</key><integer>1</integer><key>ServicesMenu</key><integer>1</integer><key>TouchBar</key><integer>1</integer></dict></dict>'
+/System/Library/CoreServices/pbs -flush
+killall Finder
+```
+
+> 注意 key 外层的那对**双引号是必需的**。否则 `defaults` 会把 `(null)` 当作 plist 字面量去解析，
+> 报错 `Could not parse: (null) - Copy Path - runWorkflowAsService`。
+
+其它排查手段：
+
+1. 菜单项可能在右键菜单**中部的「快速操作」子菜单**，也可能在**底部的「服务」子菜单**，两处都看一下。
 2. 重启 Finder：`killall Finder`。
 3. 手动刷新服务缓存：`/System/Library/CoreServices/pbs -flush`。
-
-**菜单项藏在二级菜单里？**
-
-macOS 会把快速操作收进右键菜单的「快速操作」子菜单。若当前目录下的快速操作只有一个，部分系统版本会直接显示在一级菜单。
+4. macOS 14 之后，快速操作还可以在 **系统设置 → 通用 → 登录项与扩展 → 快速操作** 中管理，
+   这与「键盘快捷键 → 服务」是两个不同的地方。
 
 **确认服务是否已注册成功：**
 
 ```bash
 /System/Library/CoreServices/pbs -dump_pboard | grep -A2 'Copy Path'
 ```
+
+**菜单项藏在二级菜单里？**
+
+macOS 会把快速操作收进右键菜单的「快速操作」子菜单。若当前目录下的快速操作只有一个，部分系统版本会直接显示在一级菜单。
 
 ## 项目结构
 
@@ -125,6 +157,29 @@ printf '%s' "$out" | pbcopy
    ```
 
    这样文件名里含双引号或反斜杠也不会破坏脚本；末尾的 `|| true` 保证通知失败绝不影响复制结果。
+
+### 为什么需要显式启用右键菜单
+
+把 workflow 放进 `~/Library/Services/` 只完成了一半：`pbs`（系统的服务管理进程）会扫描到它，
+于是它出现在系统设置的服务列表中。但**它是否真的显示在 Finder 右键菜单里，是另一个开关**，
+存放在 pbs 偏好 `~/Library/Preferences/pbs.plist` 中：
+
+```
+NSServicesStatus
+  └── "(null) - Copy Path - runWorkflowAsService"
+        └── presentation_modes
+              ├── ContextMenu   = 1   ← 决定是否出现在右键菜单
+              ├── FinderPreview = 1
+              ├── ServicesMenu  = 1
+              └── TouchBar      = 1
+```
+
+全新安装的服务在这里**没有任何记录**，右键菜单里就可能不出现。这正是「服务列表里看得见、
+右键菜单里找不到」的成因。而且这份偏好属于系统状态，**不随 git 仓库分发**——所以每台机器
+首次安装都可能遇到，`install.sh` 因此主动写入这条记录。
+
+键名前缀是字面量 `(null)`，因为 workflow 的 `Info.plist` 里没有 `CFBundleIdentifier`；
+Automator 自己保存的 workflow 同样如此。
 
 ## 二次开发
 
