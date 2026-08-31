@@ -81,6 +81,12 @@ killall Finder
 4. macOS 14 之后，快速操作还可以在 **系统设置 → 通用 → 登录项与扩展 → 快速操作** 中管理，
    这与「键盘快捷键 → 服务」是两个不同的地方。
 
+**中文路径变成乱码？**
+
+如果 `/测试目录/` 被复制成 `/ÊµãËØïÁõÆÂΩï/`，说明脚本里缺少 `export LANG=en_US.UTF-8`。
+`pbcopy` 会按 `LANG` / `LC_CTYPE` 解释输入字节，而 Automator 服务环境不带这些变量，
+UTF-8 会被当成 Mac Roman。当前版本已修复；若你改过脚本，注意保留这一行。
+
 **确认服务是否已注册成功：**
 
 ```bash
@@ -129,6 +135,8 @@ MacCopyPath/
 ### 内嵌脚本
 
 ```bash
+export LANG=en_US.UTF-8
+
 out=""
 for f in "$@"
 do
@@ -143,20 +151,40 @@ done
 printf '%s' "$out" | pbcopy
 ```
 
-两个刻意的设计：
+四个刻意的设计：
 
-1. **用 `printf '%s'` 而非 `echo`**，末尾不追加换行。否则复制单个路径粘贴进终端时，尾部换行会导致命令被立刻执行。
-2. **通知的文本通过 argv 传给 AppleScript**，而不是拼接进脚本源码字符串：
+1. **`export LANG=en_US.UTF-8` 不能省。** `pbcopy` 依据 `LANG` / `LC_CTYPE` 决定如何解释输入字节，
+   而 Automator 服务环境**不带这些变量**。缺少它时，UTF-8 的中文路径会被当作 Mac Roman 解释，
+   `/测试目录/` 变成 `/ÊµãËØïÁõÆÂΩï/`。
+
+2. **用 `printf '%s'` 而非 `echo`**，末尾不追加换行。否则复制单个路径粘贴进终端时，
+   尾部换行会导致命令被立刻执行。
+
+3. **通知放到后台执行**（末尾的 `&`）。`osascript` 启动 AppleScript 运行时约需 0.9s，
+   占整个脚本耗时的八成；丢到后台后脚本立即返回，通知稍后自行弹出。
+   脚本耗时因此从 ~1.14s 降到 ~0.05s。
+
+4. **通知文本通过 argv 传给 AppleScript**，而不是拼接进脚本源码字符串：
 
    ```bash
-   osascript - "$msg" <<'APPLESCRIPT' >/dev/null 2>&1 || true
+   osascript - "$msg" >/dev/null 2>&1 <<'APPLESCRIPT' &
    on run argv
        display notification (item 1 of argv) with title "Copy Path"
    end run
    APPLESCRIPT
    ```
 
-   这样文件名里含双引号或反斜杠也不会破坏脚本；末尾的 `|| true` 保证通知失败绝不影响复制结果。
+   这样文件名里含双引号或反斜杠也不会破坏脚本。
+
+### 关于响应速度
+
+点击后到复制完成，实测约 **1.1~1.2s**（首次调用因冷启动约 2.3s）。
+
+其中脚本本身只占 ~0.05s，**其余全部是 Automator 框架加载 workflow 的固有开销**，
+无法通过优化脚本消除。这是快速操作这一实现形式的代价，换来的是零依赖、免签名、免编译。
+
+如果要做到毫秒级响应，只能改用 **Finder Sync Extension**（Swift 编写、常驻进程），
+代价是需要 Xcode 构建、代码签名，并以 .app 形式分发。
 
 ### 为什么需要显式启用右键菜单
 

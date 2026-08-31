@@ -59,10 +59,8 @@
 				<key>ActionParameters</key>
 				<dict>
 					<key>COMMAND_STRING</key>
-					<string># Copy the full path of the item(s) selected in Finder to the clipboard.
-# Selections arrive as positional arguments ("as arguments" input mode).
-# Multiple paths are joined with newlines; no trailing newline is added, so a
-# single path can be pasted straight into a terminal without running it.
+					<string>export LANG=en_US.UTF-8
+
 out=""
 for f in "$@"
 do
@@ -76,19 +74,17 @@ done
 
 printf '%s' "$out" | pbcopy
 
-# Lightweight confirmation. The path is passed via argv rather than being
-# interpolated into the AppleScript source, so quotes/backslashes in a
-# filename cannot break it. A failure here must never affect the copy itself.
 if [ "$#" -eq 1 ]; then
     msg="$out"
 else
     msg="$# paths copied"
 fi
-osascript - "$msg" &lt;&lt;'APPLESCRIPT' &gt;/dev/null 2&gt;&amp;1 || true
+osascript - "$msg" &gt;/dev/null 2&gt;&amp;1 &lt;&lt;'APPLESCRIPT' &amp;
 on run argv
     display notification (item 1 of argv) with title "Copy Path"
 end run
-APPLESCRIPT</string>
+APPLESCRIPT
+disown 2&gt;/dev/null || true</string>
 					<key>CheckedForUserDefaultShell</key>
 					<true/>
 					<key>inputMethod</key>
